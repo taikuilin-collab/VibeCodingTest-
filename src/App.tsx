@@ -184,7 +184,7 @@ export default function App() {
     setEscapeResult(null);
     setAccusationResult(null);
     setEscapeAttempts(3);
-    setShowIntro(launchGame);
+    setShowIntro(false);
     setCurrentHintLevel(0);
     if (launchGame) {
       setShowWelcomePortal(false);
