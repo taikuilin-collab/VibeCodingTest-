@@ -1,0 +1,6 @@
+{
+  "name": "矛盾検知脱出ゲーム",
+  "description": "相手の発言から論理的な矛盾やウソを見破り、脱出を試みる対話型ミステリー推理ゲーム。多彩なストーリー設定（洋館の執事、ループする列車、未来の看守、カスタムAIモード）を搭載し、プレイヤーの「異議あり！」をAIが論理判定します。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
