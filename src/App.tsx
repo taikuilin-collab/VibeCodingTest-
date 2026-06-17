@@ -68,6 +68,48 @@ interface Scenario {
   customUnlockedEvidences?: Record<string, Evidence>;
 }
 
+// Single global/module-level Audio instance to guarantee there is absolutely no overlapping or duplicated BGM
+const getBgmAudio = (): HTMLAudioElement | null => {
+  if (typeof window === 'undefined') return null;
+  const win = window as any;
+  if (!win.__globalBgmAudio) {
+    // If there are any stray audio elements from previous hot reloads, pause and clear them
+    if (win.__compiledBgmAudios) {
+      win.__compiledBgmAudios.forEach((aud: any) => {
+        try {
+          aud.pause();
+          aud.src = '';
+        } catch (e) {}
+      });
+      win.__compiledBgmAudios.clear();
+    } else {
+      win.__compiledBgmAudios = new Set();
+    }
+
+    const audio = new Audio('/title.mp3');
+    audio.loop = true;
+    audio.volume = 0.4;
+    win.__globalBgmAudio = audio;
+    win.__compiledBgmAudios.add(audio);
+  }
+  return win.__globalBgmAudio;
+};
+
+const getStartSeAudio = (): HTMLAudioElement | null => {
+  if (typeof window === 'undefined') return null;
+  const win = window as any;
+  if (!win.__globalStartSeAudio) {
+    const se = new Audio('/gamestart.mp3');
+    se.loop = false;
+    se.volume = 0.6;
+    win.__globalStartSeAudio = se;
+    if (win.__compiledBgmAudios) {
+      win.__compiledBgmAudios.add(se);
+    }
+  }
+  return win.__globalStartSeAudio;
+};
+
 export default function App() {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [currentScenario, setCurrentScenario] = useState<Scenario | null>(null);
@@ -113,44 +155,59 @@ export default function App() {
   const [currentHintLevel, setCurrentHintLevel] = useState<number>(0); // 0 = no hints revealed, 1 = hint 1, 2 = hint 2, 3 = hint 3 (direct answer)
 
   // BGM & Playback Controls
-  const [bgmAudio, setBgmAudio] = useState<HTMLAudioElement | null>(null);
+  // Managed via global BGM audio helper 'getBgmAudio' single instance to prevent duplicate playback
 
   useEffect(() => {
-    const audio = new Audio('/title.mp3');
-    audio.loop = true;
-    audio.volume = 0.4;
-    setBgmAudio(audio);
-
-    return () => {
-      audio.pause();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!bgmAudio) return;
+    const audio = getBgmAudio();
+    if (!audio) return;
 
     if (showWelcomePortal) {
       const startBgm = () => {
-        bgmAudio.play().catch(err => {
-          console.log("Autoplay prevented, waiting for user interaction to play BGM:", err);
-        });
+        audio.loop = true;
+        audio.volume = 0.4;
+        if (audio.paused) {
+          audio.play().catch(err => {
+            console.log("Autoplay prevented, waiting for user interaction to play BGM:", err);
+          });
+        }
       };
       
       startBgm();
-      // Listen to click to play BGM if autoplay was blocked
-      window.addEventListener('click', startBgm, { once: true });
+
+      // Extensive list of interaction events to reliably unlock audio on any modern browser / iframe context
+      const unlockEvents = ['click', 'pointerdown', 'touchstart', 'mousedown', 'keydown'];
+      
+      const onUserInteract = () => {
+        startBgm();
+      };
+
+      unlockEvents.forEach(evt => {
+        window.addEventListener(evt, onUserInteract, { once: true });
+        document.addEventListener(evt, onUserInteract, { once: true });
+      });
+
       return () => {
-        window.removeEventListener('click', startBgm);
+        unlockEvents.forEach(evt => {
+          window.removeEventListener(evt, onUserInteract);
+          document.removeEventListener(evt, onUserInteract);
+        });
       };
     } else {
-      bgmAudio.pause();
+      // Pause title BGM when outside the welcome portal
+      audio.pause();
     }
-  }, [bgmAudio, showWelcomePortal]);
+  }, [showWelcomePortal]);
 
   const playStartSE = () => {
-    const se = new Audio('/gamestart.mp3');
+    const se = getStartSeAudio();
+    if (!se) return;
+    se.loop = false;
     se.volume = 0.6;
-    se.play().catch(err => console.log("SE audio play prevented:", err));
+    // Do not overlap play if already playing
+    if (se.paused || se.ended) {
+      se.currentTime = 0;
+      se.play().catch(err => console.log("SE audio play prevented or delayed:", err));
+    }
   };
 
   // Fetch scenarios on load
@@ -175,6 +232,20 @@ export default function App() {
   };
 
   const selectScenario = (scenario: Scenario, launchGame: boolean = true) => {
+    const audio = getBgmAudio();
+    if (audio) {
+      if (launchGame) {
+        // "「捜査を開始する」ボタン押下時は、まず title.mp3 を停止（pause）し、その後 gamestart.mp3 を再生すること。"
+        audio.pause();
+      } else {
+        // Just selecting, make sure title.mp3 keeps playing
+        if (audio.paused) {
+          audio.play().catch(err => {
+            console.log("BGM play failed on selectScenario selecting:", err);
+          });
+        }
+      }
+    }
     setCurrentScenario(scenario);
     setUnlockedEvidences(scenario.evidences);
     setSolvedContradictions([]);
@@ -198,6 +269,29 @@ export default function App() {
       avatar: "🕵️"
     });
     setDialogText(`${scenario.title}へようこそ。${scenario.intro} 関係者からよく話を分析し、矛盾を暴き出してください。`);
+  };
+
+  const handleGoToPortal = () => {
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    // Clean all audio playbacks on returning to portal
+    const se = getStartSeAudio();
+    if (se) {
+      se.pause();
+      se.currentTime = 0;
+    }
+    const audio = getBgmAudio();
+    if (audio) {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.loop = true;
+      audio.volume = 0.4;
+      audio.play().catch(err => {
+        console.log("Failed to restart title BGM on returning to portal:", err);
+      });
+    }
+    setShowWelcomePortal(true);
   };
 
   // Generate Custom Scenario with Gemini
@@ -425,7 +519,9 @@ export default function App() {
   };
 
   return (
-    <div className="lg:h-screen lg:overflow-hidden min-h-screen bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-amber-500 selection:text-neutral-900 overflow-x-hidden relative">
+    <div className={`${
+      showWelcomePortal ? 'min-h-screen' : 'lg:h-screen lg:overflow-hidden min-h-screen'
+    } bg-neutral-950 text-neutral-100 flex flex-col font-sans selection:bg-amber-500 selection:text-neutral-900 overflow-x-hidden relative`}>
       
       {/* Dynamic Text Cutscene overlay */}
       {showAnimationText && (
@@ -441,19 +537,33 @@ export default function App() {
       )}
 
       {/* Brand Navigation Bar */}
-      <nav className="border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-md shrink-0 z-40 px-4 py-0 flex flex-col items-center justify-center gap-1">
+      <nav className={`border-b border-neutral-800 bg-neutral-950/80 backdrop-blur-md shrink-0 z-40 px-4 transition-all duration-300 flex flex-col items-center justify-center ${
+        showWelcomePortal ? 'py-0 gap-1' : 'py-1.5 gap-1.5'
+      }`}>
         <div className="flex flex-col items-center text-center gap-0">
-          <h1 className="m-0 p-0 leading-none">
-            <img src="/title.png" referrerPolicy="no-referrer" alt="矛盾検知脱出ゲーム" className="w-auto h-auto max-h-64 md:max-h-96 lg:max-h-[440px] max-w-full object-contain mx-auto transition-transform duration-300 hover:scale-105 -my-10 md:-my-20 lg:-my-32 block" />
+          <h1 
+            onClick={() => { if (!showWelcomePortal) handleGoToPortal(); }}
+            className={`m-0 p-0 leading-none flex items-center justify-center transition-all duration-300 ${
+              showWelcomePortal
+                ? 'h-48 sm:h-64 md:h-80 lg:h-96 w-full max-w-xl md:max-w-2xl lg:max-w-3xl px-4'
+                : 'h-8 md:h-10 overflow-hidden cursor-pointer hover:opacity-80 active:scale-95'
+            }`}
+            title={!showWelcomePortal ? "事件選択ポータルに戻る" : undefined}
+          >
+            <img
+              src="/title.png"
+              referrerPolicy="no-referrer"
+              alt="矛盾検知脱出ゲーム"
+              className="w-full h-full object-contain mx-auto transition-all duration-300 block"
+            />
           </h1>
-          <p className="text-xs text-neutral-500 font-mono tracking-widest uppercase mt-0">Dynamic LLM Contradiction Escape Engine</p>
         </div>
 
         {/* Preset Scenarios selector */}
         <div className="flex flex-wrap items-center gap-2 justify-center">
           <button
             id="nav-btn-portal"
-            onClick={() => setShowWelcomePortal(true)}
+            onClick={handleGoToPortal}
             className={`px-3 py-1.5 rounded-full text-xs font-black transition-all duration-300 border flex items-center gap-1.5 ${
               showWelcomePortal
                 ? 'bg-amber-500 text-neutral-950 border-amber-400 shadow-md shadow-amber-500/10 scale-105'
@@ -506,7 +616,9 @@ export default function App() {
       </nav>
 
       {/* Main Playable Stage */}
-      <main className="flex-1 min-h-0 max-w-7xl w-full mx-auto p-4 md:p-5 flex flex-col gap-4 overflow-hidden">
+      <main className={`flex-1 min-h-0 max-w-7xl w-full mx-auto p-4 md:p-5 flex flex-col gap-4 ${
+        showWelcomePortal ? 'overflow-visible' : 'overflow-hidden'
+      }`}>
         
         {/* Scenario Intro Overlay Dossier Modal */}
         {currentScenario && showIntro && !showWelcomePortal && (
