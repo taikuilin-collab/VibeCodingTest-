@@ -100,7 +100,7 @@ const getStartSeAudio = (): HTMLAudioElement | null => {
   const win = window as any;
   if (!win.__globalStartSeAudio) {
     const se = new Audio('/gamestart.mp3');
-    se.loop = false;
+    se.loop = true;
     se.volume = 0.6;
     win.__globalStartSeAudio = se;
     if (win.__compiledBgmAudios) {
@@ -201,7 +201,7 @@ export default function App() {
   const playStartSE = () => {
     const se = getStartSeAudio();
     if (!se) return;
-    se.loop = false;
+    se.loop = true;
     se.volume = 0.6;
     // Do not overlap play if already playing
     if (se.paused || se.ended) {
@@ -1391,7 +1391,7 @@ export default function App() {
                   
                   <button
                     id="btn-back-to-preset"
-                    onClick={() => selectScenario(currentScenario)}
+                    onClick={handleGoToPortal}
                     className="bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs px-5 py-2.5 rounded-xl transition-all flex items-center gap-1.5 hover:scale-[1.02] shadow-md shadow-amber-500/10"
                   >
                     <span>捜査官バインダーに戻る</span>
